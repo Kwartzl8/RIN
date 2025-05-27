@@ -1,0 +1,33 @@
+_target_: src.models.image_diffusion.ImageDiffusionLitModule
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: min
+  factor: 0.1
+  patience: 10
+
+noise_scheduler:
+  _target_: flow_matching.path.scheduler.CondOTScheduler
+
+bregman_divergence:
+  _target_: src.models.components.bregman_divergence.L2Loss
+
+net:
+  _target_: src.models.components.RIN.RIN
+  dim: 256
+  image_size: 64
+  depth: 6
+  num_latents: 128
+  dim_latent: 512
+  latent_self_attn_depth: 4
+  self_conditioning_prob: 0.9
+
+# compile model for faster training with pytorch 2.0
+compile: false
