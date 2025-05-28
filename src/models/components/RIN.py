@@ -385,6 +385,7 @@ class RIN(nn.Module):
         dim_latent = None,              # will default to image dim (dim)
         num_latents = 256,              # they still had to use a fair amount of latents for good results (256), in line with the Perceiver line of papers from Deepmind
         learned_sinusoidal_dim = 16,
+        self_conditioning_prob = 0.9,
         latent_token_time_cond = False, # whether to use 1 latent token as time conditioning, or do it the adaptive layernorm way (which is highly effective as shown by some other papers "Paella" - Dominic Rampas et al.)
         dual_patchnorm = True,
         patches_self_attn = True,       # the self attention in this repository is not strictly with the design proposed in the paper. offer way to remove it, in case it is the source of instability
@@ -407,6 +408,7 @@ class RIN(nn.Module):
         time_dim = dim * 4
         fourier_dim = learned_sinusoidal_dim + 1
 
+        self.train_prob_self_cond = self_conditioning_prob
         self.latent_token_time_cond = latent_token_time_cond
         time_output_dim = dim_latent if latent_token_time_cond else time_dim
 
@@ -477,7 +479,7 @@ class RIN(nn.Module):
     def device(self):
         return next(self.parameters()).device
 
-    def forward(
+    def model_step(
         self,
         x,
         time,
@@ -511,7 +513,7 @@ class RIN(nn.Module):
             latents = torch.cat((latents, t), dim = -2)
 
         # to patches
-
+        
         patches = self.to_patches(x)
 
         height_range = width_range = torch.linspace(0., 1., steps = int(math.sqrt(patches.shape[-2])), device = self.device)
@@ -538,3 +540,29 @@ class RIN(nn.Module):
             latents = latents[:, :-1]
 
         return pixels, latents
+
+    def forward(
+        self,
+        x,
+        time,
+        x_self_cond = None,
+        latent_self_cond = None,
+        return_latents = False
+    ):
+        self_cond = self_latents = None
+        if random() < self.train_prob_self_cond:
+            with torch.no_grad():
+                model_output, self_latents = self.model_step(x, time, return_latents=True)
+                self_latents = self_latents.detach()
+                # I removed velocity conversion for pixel self-conditioning. This is not even in the paper.
+                self_cond = model_output
+
+                # we are clamping to bring it back to image space, but this is not strictly necessary as it goes back to the model input
+                # Not clamping has been shown to improve results.
+                self_cond.clamp_(-1., 1.)
+                self_cond = self_cond.detach()
+
+        # predict and take gradient step
+
+        estimate = self.model_step(x, time, self_cond, self_latents)
+        return estimate

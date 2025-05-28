@@ -1,0 +1,14 @@
+_target_: src.models.components.RIN.RIN
+dim: 256
+image_size: 64
+patch_size: 4
+channels: 3
+depth: 6
+latent_self_attn_depth: 4
+dim_latent: null
+num_latents: 256
+learned_sinusoidal_dim: 16
+self_conditioning_prob: 0.9
+latent_token_time_cond: False
+dual_patchnorm: True
+patches_self_attn: True
