@@ -104,10 +104,6 @@ class ImageDiffusionLitModule(LightningModule):
         batch = batch[0] if isinstance(batch, (list, tuple)) else batch
 
         t = torch.rand((batch.shape[0],), device=batch.device)
-        t = torch.distributions.Beta(
-            torch.tensor(4., device=batch.device),
-            torch.tensor(2., device=batch.device)
-            ).sample(t.shape).to(batch.device)
         noise = torch.randn_like(batch)
 
         probability_path = AffineProbPath(scheduler=self.noise_scheduler)

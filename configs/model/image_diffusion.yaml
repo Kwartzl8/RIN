@@ -22,8 +22,8 @@ bregman_divergence:
 objective: "velocity"
 
 # Inference time parameters.
-num_sampling_steps: 50
-inference_batch_size: 16
+num_sampling_steps: 100
+inference_batch_size: 2
 
 # compile model for faster training with pytorch 2.0
 compile: false

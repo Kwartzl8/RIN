@@ -3,10 +3,10 @@ dim: 128
 image_size: 64
 patch_size: 4
 channels: 3
-depth: 4
+depth: 6
 latent_self_attn_depth: 6
 dim_latent: null
-num_latents: 128
+num_latents: 256
 learned_sinusoidal_dim: 16
 self_conditioning_prob: 0.9
 latent_token_time_cond: False
