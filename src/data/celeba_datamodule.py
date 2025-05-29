@@ -105,9 +105,11 @@ class CelebADataModule(LightningDataModule):
 
         Do not use it to assign state (self.x = y).
         """
-        CelebA(self.hparams.data_dir, split="train", download=True)
-        CelebA(self.hparams.data_dir, split="valid", download=True)
-        CelebA(self.hparams.data_dir, split="test", download=True)
+        # Dataset is already downloaded.
+        # CelebA(self.hparams.data_dir, split="train", download=True)
+        # CelebA(self.hparams.data_dir, split="valid", download=True)
+        # CelebA(self.hparams.data_dir, split="test", download=True)
+        pass
 
     def setup(self, stage: Optional[str] = None) -> None:
         """Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.

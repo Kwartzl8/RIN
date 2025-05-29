@@ -11,8 +11,7 @@ from flow_matching.path.scheduler import (
     PolynomialConvexScheduler,
 )
 from flow_matching.path import AffineProbPath
-from flow_matching.solver import Solver, ODESolver
-from flow_matching.utils import ModelWrapper
+from torchdiffeq import odeint
 
 from src.models.components.bregman_divergence import BregmanDivergence
 
@@ -55,6 +54,8 @@ class ImageDiffusionLitModule(LightningModule):
         noise_scheduler: Scheduler,
         bregman_divergence: BregmanDivergence,
         objective: str, # 'velocity', 'denoiser'
+        num_sampling_steps: int,
+        inference_batch_size: int,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
@@ -79,9 +80,12 @@ class ImageDiffusionLitModule(LightningModule):
         self.objective = objective
         # loss function
         self.criterion = bregman_divergence
-
         # for averaging loss across batches
         self.train_loss = MeanMetric()
+
+        # Inference time parameters.
+        self.num_samples_to_generate = inference_batch_size
+        self.num_sampling_steps = num_sampling_steps
 
     def on_train_start(self) -> None:
         """Lightning hook that is called when training begins."""
@@ -96,10 +100,14 @@ class ImageDiffusionLitModule(LightningModule):
     ):
         # TODO pre-condition batch if necessary
 
-        # This is unguided diffusion, get rid of the condition (second in tuple).
+        # This is unguided diffusion, get rid of the conditioning (second element in tuple).
         batch = batch[0] if isinstance(batch, (list, tuple)) else batch
 
         t = torch.rand((batch.shape[0],), device=batch.device)
+        t = torch.distributions.Beta(
+            torch.tensor(4., device=batch.device),
+            torch.tensor(2., device=batch.device)
+            ).sample(t.shape).to(batch.device)
         noise = torch.randn_like(batch)
 
         probability_path = AffineProbPath(scheduler=self.noise_scheduler)
@@ -128,21 +136,89 @@ class ImageDiffusionLitModule(LightningModule):
         # average loss across batches
         self.train_loss(loss)
         # log the loss
-        self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
 
+    def ode_sample_rin(
+        self,
+        num_samples: int,
+        num_steps: int,
+        batch_shape: Tuple[int, ...],
+    ):
+        """
+        Sample from the RIN model using ODE solver.
+        :param num_samples: The number of samples to generate.
+        :param batch_shape: The shape of the batch to generate.
+        :return: A tensor of shape (num_samples, *batch_shape).
+        """
+        assert self.objective == 'velocity', "ODE sampling is only supported for velocity objective."
+
+        # Make sure the latent is reset.
+        self.net.current_latents = None
+
+        # Starting noise.
+        x_init = torch.randn(num_samples, *batch_shape, device=self.device)
+        # Time grid for the ODE solver.
+        time_grid = torch.linspace(0, 1, num_steps, device=self.device)
+
+        assert not self.training, "ODE sampling should not be done in training mode, as latents are reset every forward pass."
+
+        def ode_func(t: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+            return self.net(x, t)
+        
+        # Set torch.no_grad() just to make sure, it should be set upstream by PyTorch Lightning.
+        with torch.no_grad():
+            # Solve using super fast torchdiffeq solver.
+            solution = odeint(
+                func=ode_func,
+                y0=x_init,
+                t=time_grid,
+                method="midpoint",
+            )
+        
+        # This saves all noisy intermediates, only keep the fully denoised sample.
+        solution = solution[-1]
+        assert solution.shape == (num_samples, *batch_shape), f"Expected solution shape {(num_samples, *batch_shape)}, got {solution.shape}"
+
+        # Log the generated images, one at a time.
+        # Probably only works with wandb.
+        self.logger.log_image(key="samples", images=[solution[i] for i in range(num_samples)])
+
+
     def validation_step(self, batch, batch_idx):
-        # Only makes sense if we have a metric to validate against. FID works with unguided diffusion. FWD only works with guided diffusion.
+        # batch_shape should be of the form (batch_size, channels, height, width)
+        batch_shape = batch[0].shape if isinstance(batch, (list, tuple)) else batch.shape
+        self.ode_sample_rin(
+            num_samples=1,
+            num_steps=self.num_sampling_steps,
+            batch_shape=batch_shape[1:],    # Only send in the shape of the image, not the batch size, as that changes for inference time.
+        )
         pass
 
     def test_step(self, batch, batch_idx):
-        # Same as validation step.
-        pass
+        """
+        I will use this to generate samples from the model at test time.
+        The input batch is a tuple of (data, guiding_variable). For guided (or conditional) diffusion, guiding_variable is used to generate samples.
+        The generated samples can be compared against data with some metric (RMSE reconstruction error, etc).
+        We are only doing unguided diffusion for now, and so batch will not be used at all.
+        The generated images will be logged.
+        :param batch: The input batch, which is a tuple of (data, guiding_variable).
+        :param batch_idx: The index of the batch.
+        return: None
+        """
+        # batch_shape should be of the form (batch_size, channels, height, width)
+        batch_shape = batch[0].shape if isinstance(batch, (list, tuple)) else batch.shape
+        self.ode_sample_rin(
+            num_samples=self.num_samples_to_generate,
+            num_steps=self.num_sampling_steps,
+            batch_shape=batch_shape[1:],    # Only send in the shape of the image, not the batch size, as that changes for inference time.
+        )
+
     def predict_step(self, batch, batch_idx):
         # ?
         pass
-    
+
     def setup(self, stage: str) -> None:
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
         test, or predict.

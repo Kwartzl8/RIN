@@ -18,9 +18,12 @@ noise_scheduler:
 bregman_divergence:
   _target_: src.models.components.bregman_divergence.L2Loss
 
-
 # specify objectives to optimize
 objective: "velocity"
+
+# Inference time parameters.
+num_sampling_steps: 50
+inference_batch_size: 16
 
 # compile model for faster training with pytorch 2.0
 compile: false

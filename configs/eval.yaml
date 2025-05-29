@@ -5,7 +5,7 @@ defaults:
   - data: celeba # choose datamodule with `test_dataloader()` for evaluation
   - model: image_diffusion # choose model with `test_step()` for evaluation
   - logger: wandb
-  - trainer: default
+  - trainer: gpu
   - paths: default
   - extras: default
   - hydra: default

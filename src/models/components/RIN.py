@@ -475,6 +475,9 @@ class RIN(nn.Module):
 
         self.blocks = nn.ModuleList([RINBlock(dim, dim_latent = dim_latent, latent_self_attn_depth = latent_self_attn_depth, patches_self_attn = patches_self_attn, **attn_kwargs) for _ in range(depth)])
 
+        # Keep track of latents for latent self-conditioning during training and to be passed forward during inference.
+        self.current_latents = None
+
     @property
     def device(self):
         return next(self.parameters()).device
@@ -545,24 +548,28 @@ class RIN(nn.Module):
         self,
         x,
         time,
-        x_self_cond = None,
-        latent_self_cond = None,
-        return_latents = False
     ):
-        self_cond = self_latents = None
-        if random() < self.train_prob_self_cond:
-            with torch.no_grad():
-                model_output, self_latents = self.model_step(x, time, return_latents=True)
-                self_latents = self_latents.detach()
-                # I removed velocity conversion for pixel self-conditioning. This is not even in the paper.
-                self_cond = model_output
+        """
+        Main forward pass of the RIN model.
+        If in training mode, it may self-condition on the latents estimated through a forward pass with a probability defined by `self.train_prob_self_cond`.
+        
+        If in inference mode, it uses
+        
+        """
+        # Expand time to match batch size
+        if time.dim() == 0:
+            time = time.expand(x.shape[0])
 
-                # we are clamping to bring it back to image space, but this is not strictly necessary as it goes back to the model input
-                # Not clamping has been shown to improve results.
-                self_cond.clamp_(-1., 1.)
-                self_cond = self_cond.detach()
+        if self.training:
+            self.current_latents = None
+            if random() < self.train_prob_self_cond:
+                with torch.no_grad():
+                    _, latent_self_cond = self.model_step(x, time, return_latents=True)
+                    self.current_latents = latent_self_cond.detach_()
+                    del latent_self_cond # to save memory
 
-        # predict and take gradient step
+        estimate, latents = self.model_step(x, time, None, self.current_latents, return_latents=True)
+        self.current_latents = latents.detach_()
+        del latents
 
-        estimate = self.model_step(x, time, self_cond, self_latents)
         return estimate

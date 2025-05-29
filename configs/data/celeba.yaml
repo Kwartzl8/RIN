@@ -1,6 +1,7 @@
 _target_: src.data.celeba_datamodule.CelebADataModule
 data_dir: ${paths.data_dir}
-batch_size: 32 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-train_val_test_split: [162_770, 19_867, 19_962]
+batch_size: 128 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+# train_val_test_split: [162_770, 19_867, 19_962] # original split
+train_val_test_split: [1020, 2, 2] # toy split
 num_workers: 31
 pin_memory: False
